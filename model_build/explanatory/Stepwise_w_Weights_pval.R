@@ -2,6 +2,9 @@ library(tidyverse)
 library(survey)
 library(car)
 
+p_val <- 0.4
+vif_score <- 4
+
 ###############
 ####  Setup
 ###############
@@ -27,16 +30,24 @@ base_aic <- base_model$aic
 ####  Loop
 ###############
 
-p_val <- 0.05
-vif_score <- 4
-
 form <- formula(
   answer_desired_Aided_awareness~grp_EXP
 )
 vif_form <- form
 
 labels <- '_int|weights|grp_EXP|desired|olive'
-#vars <- names(df_raw)[!grepl('_int|weights|grp_EXP|desired|olive', names(df_raw))]
+vars <- names(df_raw)[!grepl(labels, names(df_raw))]
+
+update_vif_form <- function(original_form){
+  vars <- all.vars(original_form)
+  vars <- vars[grepl('_int', vars)]
+  
+  new_form <- update(form, 
+                     as.formula(paste(c('.~.', vars), collapse='-')
+                     ))
+  
+  new_form
+}
 
 backstep <- function(formu, p_val){
   
@@ -56,28 +67,33 @@ for (i in 1:length(vars)){
   pvalues <- c()
   
   vars <- names(df_raw)[!grepl(labels, names(df_raw))]
-  
   for (col in vars){
     col_int = paste(col, '_int', sep='')
     cols <- append(cols, col)
     int_cols <- append(int_cols, col_int)
     
-    # #Check VIF
-    # vif_check <- update(vif_form,
-    #                     as.formula(paste(".~.+", col)))
-    # 
-    # vif_model <- svyglm(
-    #   formula=vif_check,
-    #   design=df,
-    #   family='binomial'
-    # )
-    # 
-    # if (any(vif(vif_model) >= vif_score)){
-    #   pvalues <- append(pvalues, 1)
-    #   next
-    # }
+    ###########################################
+    ####### Check VIF
+    ###########################################
     
-    #With Interaction
+    vif_check <- update(vif_form,
+                        as.formula(paste(".~.+", col)))
+
+    vif_model <- svyglm(
+      formula=vif_check,
+      design=df,
+      family='binomial'
+    )
+
+    if (any(vif(vif_model) >= vif_score)){
+      pvalues <- append(pvalues, 1)
+      next
+    }
+    
+    ###########################################
+    ####### Include interactions
+    ###########################################
+    
     tmp_form_int <- update(form,
                            as.formula(paste(".~.+", col, "+", col_int)))
     
@@ -90,12 +106,13 @@ for (i in 1:length(vars)){
     mdl <- summary(tmp_model_int)$coefficients
     pvalues <- append(pvalues, mdl[nrow(mdl), 4])
   }
-  
+
   tmp_df <- data.frame(columns=cols, 
                        inters=int_cols, 
                        p=pvalues)
   
   tmp_df <- tmp_df[tmp_df$p < p_val,]
+
   if (nrow(tmp_df) == 0){
     final_model <- svyglm(
       formula=form,
@@ -129,14 +146,15 @@ for (i in 1:length(vars)){
   }
   print(form)
   labels <- paste(labels, '|', tmp_df$columns[which_min_p], sep='')
-  
-  #vif_form <- 
+  vif_form <- update_vif_form(form) 
 }
 
+
+
+
+  
+
 summary(final_model)
-
-
-
 
 
 
